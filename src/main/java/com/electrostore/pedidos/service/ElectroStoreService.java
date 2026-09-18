@@ -15,93 +15,112 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 @Service
 public class ElectroStoreService {
 
-    @Autowired
-    private ProductoRepository productoRepository;
+	@Autowired
+	private ProductoRepository productoRepository;
 
-    @Autowired
-    private PedidoRepository pedidoRepository;
+	@Autowired
+	private PedidoRepository pedidoRepository;
 
-    @Autowired
-    private ProductoCustomRepositoryImpl productoCustomRepository;
+	@Autowired
+	private ProductoCustomRepositoryImpl productoCustomRepository;
 
-    public List<Producto> listarProductos() {
-        return productoRepository.findAll();
-    }
+	public List<Producto> listarProductos() {
+		return productoRepository.findAll();
+	}
 
-    public Producto obtenerProductoPorId(Long id) {
-        return productoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
-    }
+	public Producto obtenerProductoPorId(Long id) {
+		return productoRepository.findById(id)
+				.orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + id));
+	}
 
-    public Producto guardarProducto(Producto producto) {
-        return productoRepository.save(producto);
-    }
+	public Producto guardarProducto(Producto producto) {
+		return productoRepository.save(producto);
+	}
 
-    public void eliminarProducto(Long id) {
-        if (!productoRepository.existsById(id)) {
-            throw new ResourceNotFoundException("No se puede eliminar. Producto no encontrado con ID: " + id);
-        }
-        productoRepository.deleteById(id);
-    }
+	public void eliminarProducto(Long id) {
+		if (!productoRepository.existsById(id)) {
+			throw new ResourceNotFoundException("No se puede eliminar. Producto no encontrado con ID: " + id);
+		}
+		productoRepository.deleteById(id);
+	}
 
-    public List<Producto> buscarProductosPorCategoriaNamed(String categoria) {
-        return productoRepository.findByCategoriaNamed(categoria);
-    }
+	public List<Producto> buscarProductosPorCategoriaNamed(String categoria) {
+		return productoRepository.findByCategoriaNamed(categoria);
+	}
 
-    public List<Producto> buscarPorPrecioMaximo(BigDecimal precioMax) {
-        return productoRepository.buscarPorPrecioMaximoJPQL(precioMax);
-    }
+	public List<Producto> buscarPorPrecioMaximo(BigDecimal precioMax) {
+		return productoRepository.buscarPorPrecioMaximoJPQL(precioMax);
+	}
 
-    public List<Producto> buscarPorFiltroAvanzadoEM(String keyword, Integer stockMin) {
-        return productoCustomRepository.buscarPorFiltrosAvanzados(keyword, stockMin);
-    }
+	public List<Producto> buscarPorFiltroAvanzadoEM(String keyword, Integer stockMin) {
+		return productoCustomRepository.buscarPorFiltrosAvanzados(keyword, stockMin);
+	}
 
-    @Transactional
-    public Pedido crearPedido(PedidoRequestDTO request) {
-        Pedido pedido = new Pedido();
-        pedido.setCliente(request.getCliente());
+	@Transactional
+	public Pedido crearPedido(PedidoRequestDTO request) {
+		Pedido pedido = new Pedido();
+		pedido.setCliente(request.getCliente());
 
-        BigDecimal montoTotalAcumulado = BigDecimal.ZERO;
+		BigDecimal montoTotalAcumulado = BigDecimal.ZERO;
 
-        for (ItemPedidoRequestDTO item : request.getItems()) {
-            Producto producto = productoRepository.findById(item.getProductoId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + item.getProductoId()));
+		for (ItemPedidoRequestDTO item : request.getItems()) {
+			Producto producto = productoRepository.findById(item.getProductoId()).orElseThrow(
+					() -> new ResourceNotFoundException("Producto no encontrado con el ID: " + item.getProductoId()));
 
-            if (producto.getStock() < item.getCantidad()) {
-                throw new BadRequestException("Stock insuficiente para el producto: " + producto.getNombre() 
-                        + ". Stock disponible: " + producto.getStock() + ", solicitado: " + item.getCantidad());
-            }
+			if (producto.getStock() < item.getCantidad()) {
+				throw new BadRequestException("Stock insuficiente para el producto: " + producto.getNombre()
+						+ ". Stock disponible: " + producto.getStock() + ", solicitado: " + item.getCantidad());
+			}
 
-            producto.setStock(producto.getStock() - item.getCantidad());
-            productoRepository.save(producto);
+			producto.setStock(producto.getStock() - item.getCantidad());
+			productoRepository.save(producto);
 
-            BigDecimal subtotal = producto.getPrecio().multiply(BigDecimal.valueOf(item.getCantidad()));
-            montoTotalAcumulado = montoTotalAcumulado.add(subtotal);
+			BigDecimal subtotal = producto.getPrecio().multiply(BigDecimal.valueOf(item.getCantidad()));
+			montoTotalAcumulado = montoTotalAcumulado.add(subtotal);
 
-            DetallePedido detalle = new DetallePedido();
-            detalle.setProducto(producto);
-            detalle.setCantidad(item.getCantidad());
-            detalle.setPrecioUnitario(producto.getPrecio());
-            detalle.setSubtotal(subtotal);
+			DetallePedido detalle = new DetallePedido();
+			detalle.setProducto(producto);
+			detalle.setCantidad(item.getCantidad());
+			detalle.setPrecioUnitario(producto.getPrecio());
+			detalle.setSubtotal(subtotal);
 
-            pedido.addDetalle(detalle);
-        }
+			pedido.addDetalle(detalle);
+		}
 
-        pedido.setMontoTotal(montoTotalAcumulado);
-        return pedidoRepository.save(pedido);
-    }
+		// Lógica de aplicación de descuento del Reto 1
+		BigDecimal umbralDescuento = new BigDecimal("1000.00");
+		if (montoTotalAcumulado.compareTo(umbralDescuento) > 0) {
+			BigDecimal porcentajeDescuento = new BigDecimal("0.10");
+			BigDecimal montoDescuento = montoTotalAcumulado.multiply(porcentajeDescuento).setScale(2,
+					RoundingMode.HALF_UP);
 
-    public List<Pedido> listarPedidos() {
-        return pedidoRepository.findAll();
-    }
+			pedido.setDescuento(montoDescuento);
+			pedido.setMontoTotal(montoTotalAcumulado.subtract(montoDescuento));
+		} else {
+			pedido.setDescuento(BigDecimal.ZERO);
+			pedido.setMontoTotal(montoTotalAcumulado);
+		}
 
-    public Pedido obtenerPedidoPorId(Long id) {
-        return pedidoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado con el ID: " + id));
-    }
+		return pedidoRepository.save(pedido);
+	}
+
+	public List<Pedido> listarPedidos() {
+		return pedidoRepository.findAll();
+	}
+
+	public Pedido obtenerPedidoPorId(Long id) {
+		return pedidoRepository.findById(id)
+				.orElseThrow(() -> new ResourceNotFoundException("Pedido no encontrado con el ID: " + id));
+	}
+
+	// Reto 2: Método para consultar productos con stock inferior a un umbral
+	public List<Producto> buscarProductosConStockBajo(Integer umbralStock) {
+		return productoCustomRepository.buscarProductosConStockBajo(umbralStock);
+	}
 }
